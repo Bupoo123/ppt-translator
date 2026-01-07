@@ -1,0 +1,228 @@
+
+需求：
+我想自己开发一个可以实现中文ppt，“輕鬆將您的中文PowerPoint簡報轉換為英文，同時保留原始格式。只需上傳您的PPT文件，便可獲得準確、即時的翻譯，保持幻燈片布局和設計元素的完整。
+
+
+ChatGPT 说：
+很好，这个需求非常适合你自己做，而且技术路径已经很清晰了。我按「产品定义 → 技术方案 → 实现细节 → 关键难点 → MVP 路线」一步步帮你拆解，直接可以进入开发。
+
+一、你这个工具的产品级定义（先把话说清楚）
+你这段描述本身已经很接近官网文案了，我稍微帮你工程化 + 产品化一下：
+
+轻松将中文 PowerPoint 简报转换为英文，完整保留原始格式
+只需上传 PPT 文件，即可自动识别并翻译幻灯片中的中文内容，在保持版式、字体、颜色、图表、图片和动画结构不变的前提下，生成准确、自然的英文 PPT，适用于学术汇报、商务演示和国际交流。
+
+👉 这里隐含了几个硬性技术目标：
+
+目标	含义
+不破坏布局	不改 textbox 坐标、不重新排版
+不动设计元素	图片、形状、SmartArt、图表结构保持
+只替换“文本内容”	精准定位可翻译文本
+翻译要“像人写的”	不是直译，而是 presentation English
+PPT 原格式输出	不是 PDF，不是新建 PPT
+二、整体技术架构（强烈推荐这一套）
+✅ 推荐方案：PPTX 结构级翻译（而不是截图 / OCR）
+前端（HTML） 
+   ↓ 上传
+后端
+ ├─ 解析 PPTX（XML 级）
+ ├─ 抽取可翻译文本
+ ├─ AI 翻译（上下文感知）
+ ├─ 文本回填（不改 layout）
+ └─ 导出 PPTX
+三、核心技术选型（直接可落地）
+1️⃣ PPT 解析与回填（关键）
+PPTX 本质是一个 zip + XML
+
+推荐工具：
+
+✅ Python 路线（最稳）
+python-pptx
+它可以：
+
+遍历 slides
+
+精准获取：
+
+textbox
+
+shape text
+
+table cell
+
+chart title / axis label / legend
+
+不动 layout，只改 text
+
+示例逻辑（核心思想）：
+
+from pptx import Presentation
+
+prs = Presentation("input.pptx")
+
+for slide in prs.slides:
+    for shape in slide.shapes:
+        if shape.has_text_frame:
+            for p in shape.text_frame.paragraphs:
+                original = p.text
+                p.text = translate(original)
+
+prs.save("output.pptx")
+👉 这是工业级正确路线
+❌ 不要用 LibreOffice 转换
+❌ 不要先转 PDF
+❌ 不要 OCR
+
+2️⃣ 翻译引擎设计（这是你产品的灵魂）
+🚫 不建议：
+直接整页丢给模型（会乱改）
+
+一句一句无上下文翻译（很 PPT 味不对）
+
+✅ 推荐：Slide 级上下文翻译
+策略：
+
+同一 slide 内文本 一起翻译
+
+给模型一个「这是 PPT 的第 N 页」的角色说明
+
+指定 presentation English 风格
+
+示例 Prompt（你可以直接用）：
+
+You are a professional scientific presentation translator.
+
+Translate the following Chinese text into natural, concise English
+used in PowerPoint slides.
+
+Rules:
+- Keep it short and presentation-style
+- Do NOT add explanations
+- Do NOT change numbers or symbols
+- Preserve bullet structure
+- Use consistent terminology within the same slide
+
+Chinese text:
+1. 研究背景
+2. 样本量：120例
+3. 检测灵敏度显著提升
+3️⃣ 只翻译“该翻的”，不碰这些（很重要）
+类型	处理策略
+图片	不动
+图表结构	不动
+图表中的文字	翻译
+数字	原样
+英文	跳过
+基因名 / 缩写	跳过或白名单
+页眉页脚	可选
+你可以做一个简单规则：
+
+if 中文比例 < 20% → 不翻
+四、你这个工具的真正难点（不是翻译）
+❗ 难点 1：PPT 文本碎片化
+PPT 经常是：
+
+一个句子 → 3 个 textbox
+解决方案：
+
+按 slide 聚合
+
+翻译时做 映射表
+
+翻译后再按原 textbox 回填
+
+❗ 难点 2：术语一致性（非常适合你）
+你是做 IVD / 科研的，这点是优势：
+
+建立 术语表
+
+病原名
+
+检测技术
+
+实验指标
+
+翻译前先替换成占位符
+
+翻译后再还原
+
+例如：
+
+宏基因组测序 → {{mNGS}}
+❗ 难点 3：字体与行距溢出
+翻译后英文更长，可能：
+
+换行
+
+超出文本框
+
+解决方案（MVP 阶段够用）：
+
+自动：
+
+缩小字号 5–10%
+
+或减少行距
+
+高级版再做智能压缩
+
+五、前端 MVP（你可以非常简单）
+最低可用版本（1 天能做）
+index.html：
+
+上传 PPT
+
+显示进度条
+
+下载 translated.pptx
+
+技术栈：
+
+HTML + JS
+
+后端 Flask / FastAPI
+
+本地 or 内网部署都行
+
+六、你可以怎么一步步做（强烈建议）
+🧪 第 1 步（当天）
+用 python-pptx 成功：
+
+打开 PPT
+
+改一个文本
+
+原样保存
+
+🤖 第 2 步
+接入 AI 翻译
+
+保证：
+
+不乱改
+
+不加解释
+
+🎯 第 3 步（产品感开始）
+术语表
+
+Slide 级上下文
+
+跳过英文
+
+🚀 第 4 步（你公司可用）
+批量 PPT
+
+内部术语库
+
+学术 / 商务模式切换
+
+七、一句实话（站在你背景上）
+这个工具 非常适合你们内部使用，
+而且很可能比市面上 80% 的“PPT 翻译工具”更专业，
+因为它真正理解：
+
+科研 PPT
+
+技术名词
+
