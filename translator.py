@@ -22,12 +22,13 @@ class Translator:
         if not api_key:
             raise ValueError("请设置 DEEPSEEK_API_KEY 环境变量")
         
-        # DeepSeek API endpoint - 使用正确的v1路径
+        # DeepSeek API endpoint - 使用最新V3.2版本
+        # base_url 不带 /v1，因为 OpenAI SDK 会自动添加 /v1/chat/completions
         self.client = OpenAI(
             api_key=api_key,
-            base_url="https://api.deepseek.com/v1"
+            base_url="https://api.deepseek.com"
         )
-        self.model = "deepseek-chat"  # DeepSeek的模型名称
+        self.model = "deepseek-v3.2"  # 使用最新 V3.2 模型
     
     def translate_slide(self, texts: List[str], slide_index: int) -> Dict[str, str]:
         """
