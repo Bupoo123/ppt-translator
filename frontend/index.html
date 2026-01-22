@@ -233,7 +233,21 @@
     </div>
 
     <script>
-        const API_BASE_URL = 'http://localhost:5014';
+        // 自动检测API地址（开发环境使用localhost，生产环境使用服务器IP）
+        const getApiBaseUrl = () => {
+            const hostname = window.location.hostname;
+            // 本地开发环境
+            if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '') {
+                return 'http://localhost:5014';
+            }
+            // 生产环境：使用相同的hostname和端口5014
+            return `http://${hostname}:5014`;
+        };
+        const API_BASE_URL = getApiBaseUrl();
+        
+        // 调试信息（可以在控制台查看）
+        console.log('API Base URL:', API_BASE_URL);
+        console.log('Current hostname:', window.location.hostname);
         
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('fileInput');
