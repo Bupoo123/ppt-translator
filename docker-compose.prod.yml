@@ -1,0 +1,31 @@
+services:
+  backend:
+    build: .
+    container_name: ppt-translator-backend
+    command: python3 app.py
+    ports:
+      - "5014:5014"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./outputs:/app/outputs
+      - ./.env:/app/.env
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5014/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build: .
+    container_name: ppt-translator-frontend
+    command: sh -c "cd frontend && python3 -m http.server 8014"
+    ports:
+      - "8014:8014"
+    volumes:
+      - ./frontend:/app/frontend
+    restart: unless-stopped
+    depends_on:
+      - backend

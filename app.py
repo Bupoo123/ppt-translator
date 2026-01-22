@@ -54,9 +54,8 @@ def translate_ppt():
         processor = PPTProcessor(input_path)
         slides_data = processor.extract_texts()
         
-        # 翻译（从环境变量读取API提供商，默认为deepseek）
-        api_provider = os.getenv('API_PROVIDER', 'deepseek').lower()
-        translator = Translator(provider=api_provider)
+        # 翻译（使用DeepSeek API）
+        translator = Translator()
         
         for slide_data in slides_data:
             slide_index = slide_data['slide_index']
