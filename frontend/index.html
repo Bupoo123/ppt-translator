@@ -225,6 +225,7 @@
                 <div class="progress-fill" id="progressFill"></div>
             </div>
             <div class="progress-text" id="progressText">准备中...</div>
+            <div class="upload-hint" id="progressHint" style="margin-top:8px; display:none;">大文件可能需要 3 到 10 分钟，请不要关闭页面。</div>
         </div>
 
         <button class="button" id="translateButton" disabled>开始翻译</button>
@@ -233,21 +234,7 @@
     </div>
 
     <script>
-        // 自动检测API地址（开发环境使用localhost，生产环境使用服务器IP）
-        const getApiBaseUrl = () => {
-            const hostname = window.location.hostname;
-            // 本地开发环境
-            if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '') {
-                return 'http://localhost:5014';
-            }
-            // 生产环境：使用相同的hostname和端口5014
-            return `http://${hostname}:5014`;
-        };
-        const API_BASE_URL = getApiBaseUrl();
-        
-        // 调试信息（可以在控制台查看）
-        console.log('API Base URL:', API_BASE_URL);
-        console.log('Current hostname:', window.location.hostname);
+        const API_BASE_URL = window.location.origin;
         
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('fileInput');
@@ -258,9 +245,16 @@
         const progressContainer = document.getElementById('progressContainer');
         const progressFill = document.getElementById('progressFill');
         const progressText = document.getElementById('progressText');
+        const progressHint = document.getElementById('progressHint');
         const message = document.getElementById('message');
 
         let selectedFile = null;
+        let activeTimer = null;
+        let activeTimeout = null;
+        let activeJobTimeout = null;
+        const REQUEST_TIMEOUT_MS = 60 * 1000;
+        const JOB_TIMEOUT_MS = 20 * 60 * 1000;
+        const STATUS_POLL_MS = 3000;
 
         // 点击上传区域
         uploadArea.addEventListener('click', () => {
@@ -314,54 +308,136 @@
             return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
         }
 
+        function resetProgressState() {
+            if (activeTimer) {
+                clearInterval(activeTimer);
+                activeTimer = null;
+            }
+            if (activeTimeout) {
+                clearTimeout(activeTimeout);
+                activeTimeout = null;
+            }
+        }
+
+        function startProgressTips() {
+            const stages = [
+                { second: 0, progress: 12, text: '正在上传文件...', hint: '大文件可能需要 3 到 10 分钟，请不要关闭页面。' },
+                { second: 5, progress: 22, text: '文件已上传，正在解析 PPT...', hint: '如果图片很多或动画复杂，解析会更慢。' },
+                { second: 20, progress: 38, text: '正在逐页提取文本...', hint: '页数越多，等待时间越长。' },
+                { second: 45, progress: 55, text: '正在调用翻译模型...', hint: '模型处理期间请保持页面打开。' },
+                { second: 90, progress: 68, text: '大文件处理中，请继续等待...', hint: '如果超过 5 分钟仍未完成，再考虑重试。' },
+                { second: 180, progress: 78, text: '仍在处理中...', hint: '当前任务较大，请勿刷新页面。' }
+            ];
+            const startedAt = Date.now();
+            progressHint.style.display = 'block';
+            const updateStage = () => {
+                const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+                let current = stages[0];
+                for (const stage of stages) {
+                    if (elapsed >= stage.second) current = stage;
+                }
+                progressFill.style.width = `${current.progress}%`;
+                progressText.textContent = current.text;
+                progressHint.textContent = current.hint;
+            };
+            updateStage();
+            activeTimer = setInterval(updateStage, 1000);
+        }
+
+        async function pollJob(jobId) {
+            const startedAt = Date.now();
+            progressHint.style.display = 'block';
+            progressHint.textContent = '任务已提交，正在后台处理，请保持页面打开。';
+
+            while (Date.now() - startedAt < JOB_TIMEOUT_MS) {
+                const response = await fetch(`${API_BASE_URL}/status/${jobId}`, { cache: 'no-store' });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || '查询任务状态失败');
+                }
+
+                if (data.stage) {
+                    progressText.textContent = data.stage;
+                }
+                if (typeof data.slides_done === 'number' && typeof data.slides_total === 'number' && data.slides_total > 0) {
+                    const ratio = Math.min(data.slides_done / data.slides_total, 1);
+                    progressFill.style.width = `${Math.max(15, Math.round(15 + ratio * 75))}%`;
+                    progressHint.textContent = `已处理 ${data.slides_done}/${data.slides_total} 页`; 
+                }
+
+                if (data.status === 'completed') {
+                    progressFill.style.width = '100%';
+                    progressText.textContent = '翻译完成！';
+                    progressHint.textContent = '结果已生成，可以直接下载。';
+                    return data;
+                }
+
+                if (data.status === 'failed') {
+                    throw new Error(data.error || '后台任务失败');
+                }
+
+                await new Promise(resolve => setTimeout(resolve, STATUS_POLL_MS));
+            }
+
+            throw new Error('后台任务超过 20 分钟仍未完成，请稍后重试。');
+        }
+
         // 翻译按钮
         translateButton.addEventListener('click', async () => {
             if (!selectedFile) return;
 
+            resetProgressState();
+            if (activeJobTimeout) {
+                clearTimeout(activeJobTimeout);
+                activeJobTimeout = null;
+            }
             translateButton.disabled = true;
             progressContainer.classList.add('show');
-            progressFill.style.width = '10%';
-            progressText.textContent = '上传文件中...';
             hideMessage();
 
             const formData = new FormData();
             formData.append('file', selectedFile);
+            startProgressTips();
+
+            const controller = new AbortController();
+            activeTimeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
             try {
-                progressFill.style.width = '30%';
-                progressText.textContent = '处理PPT中...';
-
                 const response = await fetch(`${API_BASE_URL}/translate`, {
                     method: 'POST',
-                    body: formData
+                    body: formData,
+                    signal: controller.signal
                 });
 
                 const data = await response.json();
 
                 if (!response.ok) {
-                    throw new Error(data.error || '翻译失败');
+                    throw new Error(data.error || '提交翻译任务失败');
                 }
 
-                progressFill.style.width = '80%';
-                progressText.textContent = '翻译完成！';
+                resetProgressState();
+                progressFill.style.width = '18%';
+                progressText.textContent = data.stage || '任务已提交';
+                progressHint.style.display = 'block';
+                progressHint.textContent = '后台处理中，请保持页面打开。';
 
-                setTimeout(() => {
-                    progressFill.style.width = '100%';
-                    progressText.textContent = '完成！';
-                    
-                    const downloadUrl = `${API_BASE_URL}/download/${data.file_id}`;
-                    showMessage(
-                        `翻译完成！已处理 ${data.slides_processed} 张幻灯片。`,
-                        'success',
-                        downloadUrl
-                    );
-                    
-                    translateButton.disabled = false;
-                }, 500);
-
+                const result = await pollJob(data.job_id);
+                const downloadUrl = `${API_BASE_URL}/download/${result.file_id}`;
+                showMessage(
+                    `翻译完成！已处理 ${result.slides_processed} 张幻灯片。`,
+                    'success',
+                    downloadUrl
+                );
+                translateButton.disabled = false;
             } catch (error) {
+                resetProgressState();
                 progressContainer.classList.remove('show');
-                showMessage('翻译失败：' + error.message, 'error');
+                progressHint.style.display = 'none';
+                const messageText = error.name === 'AbortError'
+                    ? '上传阶段等待超过 60 秒，已停止本次提交。请重试；如果仍失败，再联系管理员检查网络链路。'
+                    : '翻译失败：' + error.message;
+                showMessage(messageText, 'error');
                 translateButton.disabled = false;
             }
         });

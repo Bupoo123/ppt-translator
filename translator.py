@@ -1,6 +1,6 @@
 """
 翻译模块 - 负责AI翻译功能
-使用DeepSeek API
+支持OpenAI和DeepSeek API
 """
 import os
 from typing import List, Dict
@@ -11,24 +11,37 @@ load_dotenv()
 
 
 class Translator:
-    """翻译器类 - 使用DeepSeek API"""
+    """翻译器类"""
     
-    def __init__(self):
+    def __init__(self, provider: str = "deepseek"):
         """
         初始化翻译器
-        """
-        # DeepSeek API配置
-        api_key = os.getenv('DEEPSEEK_API_KEY')
-        if not api_key:
-            raise ValueError("请设置 DEEPSEEK_API_KEY 环境变量")
         
-        # DeepSeek API endpoint - 使用最新V3.2版本
-        # base_url 不带 /v1，因为 OpenAI SDK 会自动添加 /v1/chat/completions
-        self.client = OpenAI(
-            api_key=api_key,
-            base_url="https://api.deepseek.com"
-        )
-        self.model = "deepseek-v3.2"  # 使用最新 V3.2 模型
+        Args:
+            provider: API提供商，可选 "deepseek" 或 "openai"
+        """
+        self.provider = provider.lower()
+        
+        if self.provider == "deepseek":
+            # DeepSeek API配置
+            api_key = os.getenv('DEEPSEEK_API_KEY')
+            if not api_key:
+                raise ValueError("请设置 DEEPSEEK_API_KEY 环境变量")
+            # DeepSeek API endpoint
+            self.client = OpenAI(
+                api_key=api_key,
+                base_url="https://api.deepseek.com"
+            )
+            self.model = "deepseek-chat"  # DeepSeek的模型名称
+        elif self.provider == "openai":
+            # OpenAI API配置
+            api_key = os.getenv('OPENAI_API_KEY')
+            if not api_key:
+                raise ValueError("请设置 OPENAI_API_KEY 环境变量")
+            self.client = OpenAI(api_key=api_key)
+            self.model = "gpt-4"  # 可以使用 gpt-3.5-turbo 降低成本
+        else:
+            raise ValueError(f"不支持的API提供商: {provider}，请使用 'deepseek' 或 'openai'")
     
     def translate_slide(self, texts: List[str], slide_index: int) -> Dict[str, str]:
         """

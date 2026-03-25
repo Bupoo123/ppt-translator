@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  ppt-translator:
+    build: .
+    container_name: ppt-translator
+    ports:
+      - "5014:5014"  # 后端API端口
+      - "8014:8014"  # 前端界面端口
+    volumes:
+      - ./uploads:/app/uploads
+      - ./outputs:/app/outputs
+      - ./.env:/app/.env
+    environment:
+      - API_PROVIDER=${API_PROVIDER:-deepseek}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5014/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
